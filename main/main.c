@@ -44,8 +44,9 @@ static EventGroupHandle_t s_evt_handle;
 
 #if (ENABLE_UVC_CAMERA_FUNCTION)
 #if (ENABLE_UVC_FRAME_RESOLUTION_ANY)
-#define DEMO_UVC_FRAME_WIDTH        FRAME_RESOLUTION_ANY
-#define DEMO_UVC_FRAME_HEIGHT       FRAME_RESOLUTION_ANY
+/* 对于非标准摄像头，需要手动指定分辨率 */
+#define DEMO_UVC_FRAME_WIDTH        640
+#define DEMO_UVC_FRAME_HEIGHT       480
 #else
 #define DEMO_UVC_FRAME_WIDTH        480
 #define DEMO_UVC_FRAME_HEIGHT       320
@@ -280,6 +281,16 @@ void app_main(void)
         .frame_buffer = frame_buffer,
         .frame_cb = &camera_frame_cb,
         .frame_cb_arg = NULL,
+        /* ========== 手动配置参数（用于非标准描述符的摄像头）========== */
+        /* 根据摄像头日志中的端点信息手动指定 */
+        .format = UVC_FORMAT_MJPEG,           // MJPEG 格式
+        .format_index = 1,                     // 格式索引，尝试 1
+        .frame_index = 1,                      // 帧索引，尝试 1
+        .interface = 1,                        // VS 接口号（从日志 bInterfaceNumber 1）
+        .interface_alt = 4,                    // 备用接口（Alt=4 对应 MPS=512）
+        .ep_addr = 0x81,                       // 端点地址（从日志 bEndpointAddress 0x81）
+        .ep_mps = 512,                         // 最大包大小
+        .xfer_type = UVC_XFER_ISOC,            // 同步传输类型
     };
     /* config to enable uvc function */
     ret = uvc_streaming_config(&uvc_config);
