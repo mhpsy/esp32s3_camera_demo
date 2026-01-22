@@ -1,15 +1,12 @@
 {
-  "idf.pythonInstallPath": "C:\\Espressif\\tools\\idf-python\\3.11.2\\python.exe",
-  "idf.openOcdConfigs": [
-    "board/esp32s3-builtin.cfg"
-  ],
-  "idf.customExtraVars": {
-    "IDF_TARGET": "esp32s3"
-  },
-  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.buildPath": "${workspaceFolder}/build",
+  "clangd.path": "/home/mhpsy/.espressif/tools/esp-clang/esp-19.1.2_20250312/esp-clang/bin/clangd",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=d:\\code\\fish-tank\\demo\\05.esp_camera\\examples\\usb\\host\\usb_camera_mic_spk\\build"
-  ]
+    "--compile-commands-dir=/home/mhpsy/code/project/fish_tank/00.esp_main/build"
+  ],
+  "idf.espIdfPath": "/home/mhpsy/esp/v5.5.2/esp-idf",
+  "idf.espIdfPathWin": "/home/mhpsy/esp/v5.5.2/esp-idf"
 }
