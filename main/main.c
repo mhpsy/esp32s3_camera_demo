@@ -44,9 +44,11 @@ static EventGroupHandle_t s_evt_handle;
 
 #if (ENABLE_UVC_CAMERA_FUNCTION)
 #if (ENABLE_UVC_FRAME_RESOLUTION_ANY)
-/* 对于非标准摄像头，需要手动指定分辨率 */
-#define DEMO_UVC_FRAME_WIDTH        640
-#define DEMO_UVC_FRAME_HEIGHT       480
+/* 对于非标准摄像头，使用任意分辨率（自动匹配设备首个可用尺寸） */
+#define DEMO_UVC_FRAME_WIDTH        FRAME_RESOLUTION_ANY
+#define DEMO_UVC_FRAME_HEIGHT       FRAME_RESOLUTION_ANY
+#define DEMO_UVC_MAX_WIDTH          640
+#define DEMO_UVC_MAX_HEIGHT         480
 #else
 #define DEMO_UVC_FRAME_WIDTH        480
 #define DEMO_UVC_FRAME_HEIGHT       320
@@ -64,6 +66,9 @@ static EventGroupHandle_t s_evt_handle;
 #include "esp_camera.h"
 
 static camera_fb_t s_fb = {0};
+static uvc_config_t s_uvc_config = {0};
+static bool s_uvc_reconfigured = false;
+static bool s_uvc_bulk_failed = false;
 
 camera_fb_t *esp_camera_fb_get()
 {
@@ -143,6 +148,42 @@ static void stream_state_changed_cb(usb_stream_state_t event, void *arg)
             for (size_t i = 0; i < frame_size; i++) {
                 ESP_LOGI(TAG, "\tframe[%u] = %ux%u", i, uvc_frame_list[i].width, uvc_frame_list[i].height);
             }
+
+#if (ENABLE_UVC_FRAME_RESOLUTION_ANY)
+            if (!s_uvc_reconfigured) {
+                size_t best_index = (frame_index < frame_size) ? frame_index : 0;
+                uint32_t best_area = 0;
+                for (size_t i = 0; i < frame_size; i++) {
+                    uint16_t w = uvc_frame_list[i].width;
+                    uint16_t h = uvc_frame_list[i].height;
+                    if (w <= DEMO_UVC_MAX_WIDTH && h <= DEMO_UVC_MAX_HEIGHT) {
+                        uint32_t area = (uint32_t)w * (uint32_t)h;
+                        if (area > best_area) {
+                            best_area = area;
+                            best_index = i;
+                        }
+                    }
+                }
+
+                if (best_area > 0 && best_index != frame_index) {
+                    ESP_LOGI(TAG, "UVC: auto select %ux%u (<= %ux%u)",
+                             uvc_frame_list[best_index].width, uvc_frame_list[best_index].height,
+                             DEMO_UVC_MAX_WIDTH, DEMO_UVC_MAX_HEIGHT);
+                    s_uvc_reconfigured = true;
+                    usb_streaming_stop();
+                    s_uvc_config.frame_width = uvc_frame_list[best_index].width;
+                    s_uvc_config.frame_height = uvc_frame_list[best_index].height;
+                    esp_err_t cfg_ret = uvc_streaming_config(&s_uvc_config);
+                    if (cfg_ret != ESP_OK) {
+                        ESP_LOGE(TAG, "uvc streaming re-config failed");
+                    }
+                    usb_streaming_start();
+                    free(uvc_frame_list);
+                    break;
+                }
+                s_uvc_reconfigured = true;
+            }
+#endif
             free(uvc_frame_list);
         } else {
             ESP_LOGW(TAG, "UVC: get frame list size = %u", frame_size);
@@ -208,6 +249,9 @@ static void stream_state_changed_cb(usb_stream_state_t event, void *arg)
     }
     case STREAM_DISCONNECTED:
         ESP_LOGI(TAG, "Device disconnected");
+#if (ENABLE_UVC_FRAME_RESOLUTION_ANY)
+        s_uvc_reconfigured = false;
+#endif
         break;
     default:
         ESP_LOGE(TAG, "Unknown event");
@@ -269,7 +313,7 @@ void app_main(void)
     uint8_t *frame_buffer = (uint8_t *)malloc(DEMO_UVC_XFER_BUFFER_SIZE);
     assert(frame_buffer != NULL);
 
-    uvc_config_t uvc_config = {
+    s_uvc_config = (uvc_config_t) {
         /* match the any resolution of current camera (first frame size as default) */
         .frame_width = DEMO_UVC_FRAME_WIDTH,
         .frame_height = DEMO_UVC_FRAME_HEIGHT,
@@ -281,21 +325,30 @@ void app_main(void)
         .frame_buffer = frame_buffer,
         .frame_cb = &camera_frame_cb,
         .frame_cb_arg = NULL,
+        /* 强制匹配 MJPEG + Bulk（失败回落到 Isochronous），仅从描述符中匹配可用配置 */
+        .format = UVC_FORMAT_MJPEG,
+        .xfer_type = UVC_XFER_BULK,
         /* ========== 手动配置参数（用于非标准描述符的摄像头）========== */
         /* 根据摄像头日志中的端点信息手动指定 */
-        .format = UVC_FORMAT_MJPEG,           // MJPEG 格式
-        .format_index = 1,                     // 格式索引，尝试 1
-        .frame_index = 1,                      // 帧索引，尝试 1
-        .interface = 1,                        // VS 接口号（从日志 bInterfaceNumber 1）
-        .interface_alt = 4,                    // 备用接口（Alt=4 对应 MPS=512）
-        .ep_addr = 0x81,                       // 端点地址（从日志 bEndpointAddress 0x81）
-        .ep_mps = 512,                         // 最大包大小
-        .xfer_type = UVC_XFER_ISOC,            // 同步传输类型
+        // .format = UVC_FORMAT_MJPEG,           // MJPEG 格式
+        // .format_index = 1,                     // 格式索引，尝试 1
+        // .frame_index = 1,                      // 帧索引，尝试 1
+        // .interface = 1,                        // VS 接口号（从日志 bInterfaceNumber 1）
+        // .interface_alt = 4,                    // 备用接口（Alt=4 对应 MPS=512）
+        // .ep_addr = 0x81,                       // 端点地址（从日志 bEndpointAddress 0x81）
+        // .ep_mps = 512,                         // 最大包大小
+        // .xfer_type = UVC_XFER_ISOC,            // 同步传输类型
     };
     /* config to enable uvc function */
-    ret = uvc_streaming_config(&uvc_config);
+    ret = uvc_streaming_config(&s_uvc_config);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "uvc streaming config failed");
+        ESP_LOGW(TAG, "UVC bulk config failed, fallback to isochronous");
+        s_uvc_bulk_failed = true;
+        s_uvc_config.xfer_type = UVC_XFER_ISOC;
+        ret = uvc_streaming_config(&s_uvc_config);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "uvc streaming config failed");
+        }
     }
 #endif
 
